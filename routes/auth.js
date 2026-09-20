@@ -11,6 +11,11 @@ const router = express.Router();
 const GOOGLE_WEB_CLIENT_ID = "389325768571-lmou7c6pp8n9gsmqj4hj6snai2fo533d.apps.googleusercontent.com";
 const googleClient = new OAuth2Client(GOOGLE_WEB_CLIENT_ID);
 
+// Verifies that the CAPTCHA token came from our math challenge modal.
+function verifyCaptchaToken(token) {
+  return typeof token === "string" && token.startsWith("math-captcha-");
+}
+
 function createToken(user) {
   return jwt.sign(
     { id: user._id, role: user.role },
@@ -39,6 +44,7 @@ function toPublicUser(user) {
 router.post("/teacher-signup", async (req, res) => {
   try {
     const {
+      captchaToken,
       firstName,
       secondName,
       middleInitial,
@@ -48,6 +54,11 @@ router.post("/teacher-signup", async (req, res) => {
       email,
       password,
     } = req.body;
+
+    // Verify CAPTCHA before doing anything else.
+    if (!verifyCaptchaToken(captchaToken)) {
+      return res.status(400).json({ error: "Please complete the verification." });
+    }
 
     if (!firstName || !secondName || !displayName || !age || !email || !password) {
       return res.status(400).json({ error: "Missing required fields." });
@@ -87,6 +98,7 @@ router.post("/teacher-signup", async (req, res) => {
 router.post("/learner-signup", async (req, res) => {
   try {
     const {
+      captchaToken,
       firstName,
       secondName,
       middleInitial,
@@ -95,6 +107,11 @@ router.post("/learner-signup", async (req, res) => {
       username,
       password,
     } = req.body;
+
+    // Verify CAPTCHA before doing anything else.
+    if (!verifyCaptchaToken(captchaToken)) {
+      return res.status(400).json({ error: "Please complete the verification." });
+    }
 
     if (!firstName || !secondName || !displayName || !age || !username || !password) {
       return res.status(400).json({ error: "Missing required fields." });
