@@ -6,12 +6,12 @@ const Classwork = require("../models/ClassWork");
 const Enrollment = require("../models/Enrollment");
 const { requireAuth, requireRole } = require("../middleware/auth");
 
+// ── Teacher router ────────────────────────────────────────────────────────────
+
 const router = express.Router();
 
-// Every route below requires a logged-in teacher.
 router.use(requireAuth, requireRole("teacher"));
 
-// Avoids visually ambiguous characters (0/O, 1/I/L) in join codes.
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function generateClassCode() {
@@ -31,12 +31,6 @@ async function generateUniqueClassCode() {
   throw new Error("Couldn't generate a unique class code. Please try again.");
 }
 
-// Loads req.params.classId, checks it exists, is active, AND belongs to the
-// logged-in teacher, and attaches it as req.classDoc. Used by every
-// /:classId/... route below, so ownership + active-status only need to be
-// checked in one place. As a side effect, every nested route (stream,
-// classwork, learners, progress, edit) automatically 404s once a class is
-// soft-deleted.
 router.param("classId", async (req, res, next, classId) => {
   try {
     const classDoc = await Class.findOne({ _id: classId, status: "active" });
@@ -56,8 +50,7 @@ router.param("classId", async (req, res, next, classId) => {
   }
 });
 
-// GET /api/classes/mine - the logged-in teacher's own active classes,
-// each with a learnerCount computed from Enrollment.
+// GET /api/classes/mine
 router.get("/mine", async (req, res) => {
   try {
     const classes = await Class.aggregate([
@@ -87,10 +80,7 @@ router.get("/mine", async (req, res) => {
   }
 });
 
-// GET /api/classes/archived - the logged-in teacher's soft-deleted classes.
-// Registered BEFORE "/:classId" below - otherwise Express would match
-// "archived" as a classId value and 404 via the active-only lookup in
-// router.param("classId", ...) above.
+// GET /api/classes/archived
 router.get("/archived", async (req, res) => {
   try {
     const classes = await Class.aggregate([
@@ -120,7 +110,7 @@ router.get("/archived", async (req, res) => {
   }
 });
 
-// POST /api/classes - create a new class owned by the logged-in teacher
+// POST /api/classes
 router.post("/", async (req, res) => {
   try {
     const { title, description } = req.body;
@@ -145,7 +135,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET /api/classes/:classId - single class detail, with learner count
+// GET /api/classes/:classId
 router.get("/:classId", async (req, res) => {
   try {
     const learnerCount = await Enrollment.countDocuments({ class: req.classDoc._id });
@@ -156,9 +146,7 @@ router.get("/:classId", async (req, res) => {
   }
 });
 
-// PATCH /api/classes/:classId - update title/description.
-// Code is immutable once created; use a dedicated regenerate endpoint if
-// that's ever needed.
+// PATCH /api/classes/:classId
 router.patch("/:classId", async (req, res) => {
   try {
     const { title, description } = req.body;
@@ -181,17 +169,11 @@ router.patch("/:classId", async (req, res) => {
   }
 });
 
-// DELETE /api/classes/:classId - soft delete (shown in the app as
-// "Archive"). Marks the class as "deleted" so it disappears from the
-// teacher's active list and API access, but nothing is actually removed -
-// the Class document and all related Enrollment/StreamPost/Classwork
-// records stay in the database untouched. Pairs with the /restore route
-// below, which reverses this.
+// DELETE /api/classes/:classId
 router.delete("/:classId", async (req, res) => {
   try {
     req.classDoc.status = "deleted";
     await req.classDoc.save();
-
     res.json({ class: req.classDoc });
   } catch (err) {
     console.error(err);
@@ -199,12 +181,7 @@ router.delete("/:classId", async (req, res) => {
   }
 });
 
-// PATCH /api/classes/:archivedClassId/restore - undoes a soft delete,
-// bringing an archived class back to "active". Uses a different param
-// name (archivedClassId, not classId) on purpose: router.param("classId", ...)
-// above only loads documents with status "active", so a normal :classId
-// route would 404 before ever reaching a deleted class. This route does
-// its own lookup instead, explicitly allowing status: "deleted".
+// PATCH /api/classes/:archivedClassId/restore
 router.patch("/:archivedClassId/restore", async (req, res) => {
   try {
     const classDoc = await Class.findOne({
@@ -219,15 +196,12 @@ router.patch("/:archivedClassId/restore", async (req, res) => {
 
     classDoc.status = "active";
     await classDoc.save();
-
     res.json({ class: classDoc });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
   }
 });
-
-// ---------- Stream ----------
 
 // GET /api/classes/:classId/stream
 router.get("/:classId/stream", async (req, res) => {
@@ -263,8 +237,6 @@ router.post("/:classId/stream", async (req, res) => {
   }
 });
 
-// ---------- Classwork ----------
-
 // GET /api/classes/:classId/classwork
 router.get("/:classId/classwork", async (req, res) => {
   try {
@@ -299,11 +271,6 @@ router.post("/:classId/classwork", async (req, res) => {
   }
 });
 
-// ---------- Learners & Progress ----------
-// Both read from the same Enrollment records - one has the roster + streaks,
-// the other surfaces comprehension scores. Kept as two endpoints so the
-// frontend tabs can call exactly what they need.
-
 // GET /api/classes/:classId/learners
 router.get("/:classId/learners", async (req, res) => {
   try {
@@ -332,4 +299,82 @@ router.get("/:classId/progress", async (req, res) => {
   }
 });
 
-module.exports = router;
+// ── Learner router (read-only) ────────────────────────────────────────────────
+
+const learnerRouter = express.Router();
+
+learnerRouter.use(requireAuth, requireRole("learner"));
+
+// GET /api/learner/classes/:classId
+learnerRouter.get("/:classId", async (req, res) => {
+  try {
+    const cls = await Class.findOne({ _id: req.params.classId, status: "active" });
+    if (!cls) {
+      return res.status(404).json({ error: "Classroom not found." });
+    }
+
+    const enrolled = await Enrollment.findOne({ class: cls._id, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const learnerCount = await Enrollment.countDocuments({ class: cls._id });
+    res.json({ class: cls, learnerCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/stream
+learnerRouter.get("/:classId/stream", async (req, res) => {
+  try {
+    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const posts = await StreamPost.find({ class: req.params.classId }).sort({ createdAt: -1 });
+    res.json({ posts });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/classwork
+learnerRouter.get("/:classId/classwork", async (req, res) => {
+  try {
+    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const items = await Classwork.find({ class: req.params.classId }).sort({ dueDate: 1 });
+    res.json({ classwork: items });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/learners
+learnerRouter.get("/:classId/learners", async (req, res) => {
+  try {
+    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const enrollments = await Enrollment.find({ class: req.params.classId })
+      .populate("learner", "displayName firstName secondName")
+      .sort({ createdAt: 1 });
+
+    res.json({ learners: enrollments });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+module.exports = { teacherRouter: router, learnerRouter };
