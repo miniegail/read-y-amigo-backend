@@ -11,9 +11,10 @@ const Material = require("../models/Materials");
 
 const { requireAuth, requireRole } = require("../middleware/auth");
 
+// ── Teacher router ────────────────────────────────────────────────────────────
+
 const router = express.Router();
 
-// Every route below requires a logged-in teacher.
 router.use(requireAuth, requireRole("teacher"));
 
 // Avoids visually ambiguous characters.
@@ -301,8 +302,6 @@ router.patch("/:archivedClassId/restore", async (req, res) => {
     });
   }
 });
-
-// ---------- Stream ----------
 
 // GET /api/classes/:classId/stream
 router.get("/:classId/stream", async (req, res) => {
@@ -1117,4 +1116,82 @@ router.get("/:classId/progress", async (req, res) => {
   }
 });
 
-module.exports = router;
+// ── Learner router (read-only) ────────────────────────────────────────────────
+
+const learnerRouter = express.Router();
+
+learnerRouter.use(requireAuth, requireRole("learner"));
+
+// GET /api/learner/classes/:classId
+learnerRouter.get("/:classId", async (req, res) => {
+  try {
+    const cls = await Class.findOne({ _id: req.params.classId, status: "active" });
+    if (!cls) {
+      return res.status(404).json({ error: "Classroom not found." });
+    }
+
+    const enrolled = await Enrollment.findOne({ class: cls._id, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const learnerCount = await Enrollment.countDocuments({ class: cls._id });
+    res.json({ class: cls, learnerCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/stream
+learnerRouter.get("/:classId/stream", async (req, res) => {
+  try {
+    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const posts = await StreamPost.find({ class: req.params.classId }).sort({ createdAt: -1 });
+    res.json({ posts });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/classwork
+learnerRouter.get("/:classId/classwork", async (req, res) => {
+  try {
+    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const items = await Classwork.find({ class: req.params.classId }).sort({ dueDate: 1 });
+    res.json({ classwork: items });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/learners
+learnerRouter.get("/:classId/learners", async (req, res) => {
+  try {
+    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
+    if (!enrolled) {
+      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+    }
+
+    const enrollments = await Enrollment.find({ class: req.params.classId })
+      .populate("learner", "displayName firstName secondName")
+      .sort({ createdAt: 1 });
+
+    res.json({ learners: enrollments });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+module.exports = { teacherRouter: router, learnerRouter };
