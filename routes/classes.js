@@ -1122,21 +1122,46 @@ const learnerRouter = express.Router();
 
 learnerRouter.use(requireAuth, requireRole("learner"));
 
-// GET /api/learner/classes/:classId
-learnerRouter.get("/:classId", async (req, res) => {
+// Every /:classId/... route below requires an active class the learner is
+// enrolled in. Attaches the class to req.classDoc.
+learnerRouter.use("/:classId", async (req, res, next) => {
   try {
-    const cls = await Class.findOne({ _id: req.params.classId, status: "active" });
+    const cls = await Class.findOne({
+      _id: req.params.classId,
+      status: "active",
+    });
+
     if (!cls) {
       return res.status(404).json({ error: "Classroom not found." });
     }
 
-    const enrolled = await Enrollment.findOne({ class: cls._id, learner: req.userId });
+    const enrolled = await Enrollment.findOne({
+      class: cls._id,
+      learner: req.userId,
+    });
+
     if (!enrolled) {
-      return res.status(403).json({ error: "You're not enrolled in this classroom." });
+      return res
+        .status(403)
+        .json({ error: "You're not enrolled in this classroom." });
     }
 
-    const learnerCount = await Enrollment.countDocuments({ class: cls._id });
-    res.json({ class: cls, learnerCount });
+    req.classDoc = cls;
+    next();
+  } catch (err) {
+    console.error(err);
+    res.status(400).json({ error: "Invalid class id." });
+  }
+});
+
+// GET /api/learner/classes/:classId
+learnerRouter.get("/:classId", async (req, res) => {
+  try {
+    const learnerCount = await Enrollment.countDocuments({
+      class: req.classDoc._id,
+    });
+
+    res.json({ class: req.classDoc, learnerCount });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
@@ -1146,12 +1171,10 @@ learnerRouter.get("/:classId", async (req, res) => {
 // GET /api/learner/classes/:classId/stream
 learnerRouter.get("/:classId/stream", async (req, res) => {
   try {
-    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
-    if (!enrolled) {
-      return res.status(403).json({ error: "You're not enrolled in this classroom." });
-    }
+    const posts = await StreamPost.find({ class: req.classDoc._id })
+      .populate("author", "displayName firstName secondName role")
+      .sort({ createdAt: -1 });
 
-    const posts = await StreamPost.find({ class: req.params.classId }).sort({ createdAt: -1 });
     res.json({ posts });
   } catch (err) {
     console.error(err);
@@ -1160,15 +1183,40 @@ learnerRouter.get("/:classId/stream", async (req, res) => {
 });
 
 // GET /api/learner/classes/:classId/classwork
+// Only classwork assigned to everyone or to this learner. Correct answers
+// are stripped so learners can't read them from the API response.
 learnerRouter.get("/:classId/classwork", async (req, res) => {
   try {
-    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
-    if (!enrolled) {
-      return res.status(403).json({ error: "You're not enrolled in this classroom." });
-    }
+    const items = await Classwork.find({
+      class: req.classDoc._id,
+      $or: [{ assignToAll: true }, { assignedTo: req.userId }],
+    })
+      .populate("material")
+      .sort({ dueDate: 1, createdAt: -1 });
 
-    const items = await Classwork.find({ class: req.params.classId }).sort({ dueDate: 1 });
-    res.json({ classwork: items });
+    const classwork = items.map((item) => {
+      const obj = item.toObject();
+      obj.questions = (obj.questions || []).map(
+        ({ correctAnswer, ...question }) => question
+      );
+      return obj;
+    });
+
+    res.json({ classwork });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+// GET /api/learner/classes/:classId/materials
+learnerRouter.get("/:classId/materials", async (req, res) => {
+  try {
+    const materials = await Material.find({ class: req.classDoc._id })
+      .populate("uploadedBy", "displayName firstName secondName")
+      .sort({ createdAt: -1 });
+
+    res.json({ materials });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
@@ -1178,12 +1226,7 @@ learnerRouter.get("/:classId/classwork", async (req, res) => {
 // GET /api/learner/classes/:classId/learners
 learnerRouter.get("/:classId/learners", async (req, res) => {
   try {
-    const enrolled = await Enrollment.findOne({ class: req.params.classId, learner: req.userId });
-    if (!enrolled) {
-      return res.status(403).json({ error: "You're not enrolled in this classroom." });
-    }
-
-    const enrollments = await Enrollment.find({ class: req.params.classId })
+    const enrollments = await Enrollment.find({ class: req.classDoc._id })
       .populate("learner", "displayName firstName secondName")
       .sort({ createdAt: 1 });
 
