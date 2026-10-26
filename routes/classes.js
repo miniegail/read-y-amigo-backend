@@ -8,6 +8,7 @@ const StreamPost = require("../models/StreamPost");
 const Classwork = require("../models/ClassWork");
 const Enrollment = require("../models/Enrollment");
 const Material = require("../models/Materials");
+const { saveBuffer } = require("../utils/gridfs");
 
 const { requireAuth, requireRole } = require("../middleware/auth");
 
@@ -751,21 +752,33 @@ router.post(
         }
       }
 
-      // -------------------------
-      // Uploaded attachment
+           // -------------------------
+      // Uploaded attachment (stored in MongoDB via GridFS)
       // -------------------------
 
       let attachment = undefined;
 
       if (req.file) {
+        const fileId = await saveBuffer({
+          buffer: req.file.buffer,
+          filename: req.file.originalname,
+          mimeType: req.file.mimetype,
+          metadata: {
+            class: req.classDoc._id,
+            uploadedBy: req.userId,
+            kind: "attachment",
+          },
+        });
+
         attachment = {
           name: req.file.originalname,
-          url: `/uploads/${req.file.filename}`,
+          url: `/api/files/${fileId}`,
+          fileId,
           mimeType: req.file.mimetype,
           size: req.file.size,
         };
       }
-
+      
       // -------------------------
       // Create Classwork
       // -------------------------

@@ -84,23 +84,14 @@ const classworkSchema = new mongoose.Schema(
       min: 0,
     },
 
-    // Uploaded file
+     // Uploaded file (stored in GridFS; `url` points at /api/files/<fileId>.
+    // Older classwork may still have a legacy /uploads/... url and no fileId.)
     attachment: {
-      name: {
-        type: String,
-      },
-
-      url: {
-        type: String,
-      },
-
-      mimeType: {
-        type: String,
-      },
-
-      size: {
-        type: Number,
-      },
+      name: { type: String },
+      url: { type: String },
+      fileId: { type: mongoose.Schema.Types.ObjectId },
+      mimeType: { type: String },
+      size: { type: Number },
     },
 
     // Optional existing Material Library item

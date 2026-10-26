@@ -10,13 +10,15 @@ const { teacherRouter, learnerRouter } = require("./routes/classes");
 const commentsRoutes = require("./routes/comments");
 const enrollmentsRoutes = require("./routes/enrollments");
 const reportsRoutes = require("./routes/reports");
+const submissionsRoutes = require("./routes/submissions");
+const filesRoutes = require("./routes/files");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-// Serve uploaded files
+// Serve uploaded files (legacy attachments uploaded before files moved to MongoDB)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.use("/api/auth", authRoutes);
@@ -25,6 +27,8 @@ app.use("/api/learner/classes", learnerRouter);
 app.use("/api/enrollments", enrollmentsRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/comments", commentsRoutes);
+app.use("/api/submissions", submissionsRoutes);
+app.use("/api/files", filesRoutes);
 
 app.get("/", (req, res) => {
   res.json({ status: "READ-Y AMIGO server is running" });
