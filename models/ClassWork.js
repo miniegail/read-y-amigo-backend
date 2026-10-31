@@ -94,6 +94,9 @@ const classworkSchema = new mongoose.Schema(
       size: { type: Number },
     },
 
+    readingSource: { type: String, enum: ["file", "text"], default: "file" },
+    readingText: { type: String, default: "", maxlength: 100000 },
+
     // Optional existing Material Library item
     material: {
       type: mongoose.Schema.Types.ObjectId,

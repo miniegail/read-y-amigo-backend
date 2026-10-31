@@ -98,6 +98,13 @@ router.post(
           .json({ error: "You've already submitted this classwork." });
       }
 
+      if (req.body.transcript !== undefined && (typeof req.body.transcript !== "string" || req.body.transcript.length > 100000)) {
+        return res.status(400).json({ error: "Transcript must be text of at most 100,000 characters." });
+      }
+      if (req.body.transcriptLocale && !["en-US", "fil-PH"].includes(req.body.transcriptLocale)) {
+        return res.status(400).json({ error: "Unsupported transcript language." });
+      }
+
       const fileId = await saveBuffer({
         buffer: req.file.buffer,
         filename: req.file.originalname || "reading.m4a",
@@ -110,6 +117,8 @@ router.post(
       });
 
       const submission = await Submission.create({
+        transcript: req.body.transcript || "",
+        transcriptLocale: req.body.transcriptLocale || undefined,
         class: classDoc._id,
         classwork: classwork._id,
         learner: req.userId,

@@ -32,6 +32,9 @@ const submissionSchema = new mongoose.Schema(
       durationMs: { type: Number, default: 0 },
     },
 
+    transcript: { type: String, default: "", maxlength: 100000 },
+    transcriptLocale: { type: String, enum: ["en-US", "fil-PH"] },
+
     status: {
       type: String,
       enum: ["submitted"],

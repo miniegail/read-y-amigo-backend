@@ -1,3 +1,4 @@
+const { parseReadingSource } = require("../utils/readingSource");
 const express = require("express");
 const mongoose = require("mongoose");
 
@@ -756,6 +757,10 @@ router.post(
       // Uploaded attachment (stored in MongoDB via GridFS)
       // -------------------------
 
+      let passage;
+      try { passage = parseReadingSource(req.body, !!req.file); }
+      catch (err) { return res.status(400).json({ error: err.message }); }
+
       let attachment = undefined;
 
       if (req.file) {
@@ -784,6 +789,7 @@ router.post(
       // -------------------------
 
       const item = await Classwork.create({
+        ...passage,
         class: req.classDoc._id,
 
         title: title.trim(),
