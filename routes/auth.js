@@ -5,7 +5,15 @@ const { OAuth2Client } = require("google-auth-library");
 const User = require("../models/User");
 const { requireAuth } = require("../middleware/auth");
 
+const multer = require("multer");
+const { saveBuffer, getBucket } = require("../utils/gridfs");
+const { MAX_PHOTO_BYTES, photoMime, readingPreferences } = require("../utils/profileValidation");
 const router = express.Router();
+const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PHOTO_BYTES, files: 1 } }).single("photo");
+async function discardPhoto(id) {
+  if (id) { try { await getBucket().delete(new (require("mongoose").Types.ObjectId)(id)); } catch (error) { console.error("Photo cleanup:", error.message); } }
+}
+
 
 // Same Web Client ID you created in Google Cloud Console.
 const GOOGLE_WEB_CLIENT_ID = "389325768571-lmou7c6pp8n9gsmqj4hj6snai2fo533d.apps.googleusercontent.com";
@@ -337,6 +345,17 @@ router.patch("/me", requireAuth, async (req, res) => {
       }
     }
 
+    for (const field of ["firstName", "secondName", "displayName"]) {
+      if (updates[field] !== undefined) {
+        if (typeof updates[field] !== "string" || !updates[field].trim() || updates[field].trim().length > 100)
+          return res.status(400).json({ error: "Names must contain 1 to 100 characters." });
+        updates[field] = updates[field].trim();
+      }
+    }
+    if (req.body.readingPreferences !== undefined) {
+      try { updates.readingPreferences = readingPreferences(req.body.readingPreferences); }
+      catch (error) { return res.status(400).json({ error: error.message }); }
+    }
     if (Object.keys(updates).length === 0) {
       return res.status(400).json({ error: "No valid fields to update." });
     }
@@ -357,4 +376,41 @@ router.patch("/me", requireAuth, async (req, res) => {
   }
 });
 
+// Owner-only image upload. A replacement is saved before the old file is removed.
+router.post("/me/photo", requireAuth, (req, res) => {
+  photoUpload(req, res, async (error) => {
+    if (error) return res.status(400).json({ error: "Choose one JPG, PNG, or WebP image up to 5 MB." });
+    const mime = req.file && photoMime(req.file.buffer);
+    if (!mime) return res.status(400).json({ error: "Choose a valid JPG, PNG, or WebP image up to 5 MB." });
+    let newId;
+    try {
+      const user = await User.findById(req.userId);
+      if (!user) return res.status(404).json({ error: "User not found." });
+      newId = await saveBuffer({ buffer: req.file.buffer, filename: `profile-${req.userId}.${mime.split("/")[1]}`,
+        mimeType: mime, metadata: { kind: "profile-photo", uploadedBy: req.userId } });
+      const previous = user.profilePhotoFileId;
+      user.profilePhotoFileId = String(newId);
+      user.profilePhoto = `/api/files/${newId}`;
+      await user.save();
+      await discardPhoto(previous);
+      res.json({ user: toPublicUser(user) });
+    } catch (error) {
+      await discardPhoto(newId);
+      console.error(error);
+      res.status(500).json({ error: "Couldn't save your photo. Please try again." });
+    }
+  });
+});
+router.delete("/me/photo", requireAuth, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: "User not found." });
+    const previous = user.profilePhotoFileId;
+    user.profilePhoto = "";
+    user.profilePhotoFileId = "";
+    await user.save();
+    await discardPhoto(previous);
+    res.json({ user: toPublicUser(user) });
+  } catch (error) { res.status(500).json({ error: "Couldn't remove your photo. Please try again." }); }
+});
 module.exports = router;

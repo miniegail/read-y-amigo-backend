@@ -14,6 +14,13 @@ const userSchema = new mongoose.Schema(
     displayName: { type: String, required: true },
     age: { type: Number, required: true },
 
+    profilePhoto: { type: String, default: "" },
+    profilePhotoFileId: { type: String, default: "" },
+    readingPreferences: {
+      textSize: { type: String, enum: ["small", "standard", "large"], default: "standard" },
+      followReading: { type: Boolean, default: true },
+    },
+
     // Teacher-only field
     learnerLevel: { type: String },
 
