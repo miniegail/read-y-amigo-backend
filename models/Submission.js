@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { readingPassageSchema, readingMeasurementSchema, readingRateSchema } = require("./readingSchemas");
 
 const submissionSchema = new mongoose.Schema(
   {
@@ -29,8 +30,16 @@ const submissionSchema = new mongoose.Schema(
       url: { type: String, required: true }, // e.g. /api/files/<fileId>
       mimeType: { type: String },
       size: { type: Number },
+      durationVerified: { type: Boolean, default: false },
       durationMs: { type: Number, default: 0 },
     },
+
+    recordingInterrupted: { type: Boolean, default: false },
+    readingPassage: { type: readingPassageSchema, default: undefined },
+    readingMeasurement: { type: readingMeasurementSchema, default: undefined },
+    readingRate: { type: readingRateSchema, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    reviewedAt: Date,
 
     transcript: { type: String, default: "", maxlength: 100000 },
     transcriptLocale: { type: String, enum: ["en-US", "fil-PH"] },

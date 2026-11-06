@@ -1,3 +1,4 @@
+const { parseMeasurement, calculateRate, measureAudio, rejectAuthoredFields } = require("../utils/readingRate");
 const express = require("express");
 const mongoose = require("mongoose");
 
@@ -105,6 +106,19 @@ router.post(
         return res.status(400).json({ error: "Unsupported transcript language." });
       }
 
+      rejectAuthoredFields(req.body);
+      if (req.body.readingPassage !== undefined) return res.status(400).json({ error: "Submission passage is server authored." });
+      if (req.body.recordingInterrupted !== undefined && !['true', 'false'].includes(req.body.recordingInterrupted)) return res.status(400).json({ error: "recordingInterrupted must be true or false." });
+      const recordingInterrupted = req.body.recordingInterrupted === 'true';
+      const readingPassage = classwork.readingPassage
+        ? JSON.parse(JSON.stringify(classwork.readingPassage)) : undefined;
+      const measuredMs = await measureAudio(req.file.buffer);
+      const readingMeasurement = parseMeasurement(req.body.readingMeasurement, readingPassage, measuredMs);
+      if (readingMeasurement && recordingInterrupted) readingMeasurement.interrupted = true;
+      const readingRate = calculateRate(readingMeasurement, readingPassage, measuredMs, "provisional");
+      const legacyMs = Number(req.body.durationMs);
+      const playbackMs = measuredMs ?? (Number.isFinite(legacyMs) && legacyMs > 0 ? legacyMs : 0);
+
       const fileId = await saveBuffer({
         buffer: req.file.buffer,
         filename: req.file.originalname || "reading.m4a",
@@ -117,6 +131,7 @@ router.post(
       });
 
       const submission = await Submission.create({
+        readingPassage, readingMeasurement, readingRate, recordingInterrupted,
         transcript: req.body.transcript || "",
         transcriptLocale: req.body.transcriptLocale || undefined,
         class: classDoc._id,
@@ -127,12 +142,14 @@ router.post(
           url: `/api/files/${fileId}`,
           mimeType: req.file.mimetype,
           size: req.file.size,
-          durationMs: Math.max(0, Number(req.body.durationMs) || 0),
+          durationMs: playbackMs,
+          durationVerified: measuredMs !== null,
         },
       });
 
       res.status(201).json({ submission });
     } catch (err) {
+      if (err.status === 400) return res.status(400).json({ error: err.message });
       if (err.code === 11000) {
         return res
           .status(409)
@@ -221,7 +238,7 @@ router.get(
         }));
 
       res.json({
-        classwork: { _id: classwork._id, title: classwork.title },
+        classwork: { _id: classwork._id, title: classwork.title, readingPassage: classwork.readingPassage },
         submissions,
         notSubmitted,
       });
@@ -233,5 +250,31 @@ router.get(
     }
   }
 );
+
+// PATCH /api/submissions/:submissionId/reading-rate
+router.patch("/:submissionId/reading-rate", requireRole("teacher"), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.submissionId)) return res.status(400).json({ error: "Invalid submission id." });
+    const submission = await Submission.findById(req.params.submissionId);
+    if (!submission) return res.status(404).json({ error: "Submission not found." });
+    const classroom = await Class.findById(submission.class);
+    if (!classroom || String(classroom.teacher) !== req.userId) return res.status(403).json({ error: "You don't have access to this submission." });
+    rejectAuthoredFields(req.body);
+    if (!submission.audio?.durationVerified || !Number.isFinite(submission.audio.durationMs) || submission.audio.durationMs <= 0 || !submission.audio.fileId || !submission.readingPassage?.confirmed) return res.status(400).json({ error: "A confirmed passage snapshot and verified audio are required." });
+    if (submission.recordingInterrupted || submission.readingMeasurement?.interrupted) return res.status(400).json({ error: "Interrupted recordings cannot be reviewed for reading speed." });
+    const measurement = parseMeasurement(req.body, submission.readingPassage, submission.audio.durationMs);
+    if (!measurement) return res.status(400).json({ error: "readingMeasurement is required." });
+    submission.readingMeasurement = measurement;
+    submission.readingRate = calculateRate(measurement, submission.readingPassage, submission.audio.durationMs, "reviewed");
+    submission.reviewedBy = req.userId;
+    submission.reviewedAt = new Date();
+    await submission.save();
+    return res.json({ submission });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: "Something went wrong while reviewing reading rate." });
+  }
+});
 
 module.exports = router;

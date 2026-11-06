@@ -1,3 +1,4 @@
+const { parsePassage, rejectAuthoredFields } = require("../utils/readingRate");
 const { parseReadingSource } = require("../utils/readingSource");
 const express = require("express");
 const mongoose = require("mongoose");
@@ -758,7 +759,13 @@ router.post(
       // -------------------------
 
       let passage;
-      try { passage = parseReadingSource(req.body, !!req.file); }
+      try {
+        rejectAuthoredFields(req.body);
+        passage = parseReadingSource(req.body, !!req.file);
+        if (req.body.readingPassage !== undefined && type !== "reading") throw new Error("Only reading assignments accept readingPassage.");
+        const readingPassage = parsePassage(req.body.readingPassage, passage, req.userId);
+        if (readingPassage) passage.readingPassage = readingPassage;
+      }
       catch (err) { return res.status(400).json({ error: err.message }); }
 
       let attachment = undefined;

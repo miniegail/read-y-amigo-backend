@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { readingPassageSchema } = require("./readingSchemas");
 
 const questionSchema = new mongoose.Schema(
   {
@@ -93,6 +94,8 @@ const classworkSchema = new mongoose.Schema(
       mimeType: { type: String },
       size: { type: Number },
     },
+
+    readingPassage: { type: readingPassageSchema, default: undefined },
 
     readingSource: { type: String, enum: ["file", "text"], default: "file" },
     readingText: { type: String, default: "", maxlength: 100000 },
