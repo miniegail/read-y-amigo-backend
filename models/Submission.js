@@ -41,6 +41,17 @@ const submissionSchema = new mongoose.Schema(
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     reviewedAt: Date,
 
+    miscueReview: { type: new mongoose.Schema({
+      algorithmVersion: { type: String, enum: ['v1'], required: true },
+      listened: Boolean,
+      comparedThrough: Number,
+      events: [{ _id: false, id: String, kind: String, status: String,
+        passageStart: Number, passageEnd: Number, transcriptStart: Number, transcriptEnd: Number,
+        source: String, note: String }],
+      reviewedAt: Date,
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    }, { _id: false }), default: undefined },
+
     transcript: { type: String, default: "", maxlength: 100000 },
     transcriptLocale: { type: String, enum: ["en-US", "fil-PH"] },
 

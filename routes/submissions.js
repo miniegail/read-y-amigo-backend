@@ -277,4 +277,29 @@ router.patch("/:submissionId/reading-rate", requireRole("teacher"), async (req, 
   }
 });
 
+// Teacher observations are stored separately from speed and never become automatic scores.
+router.patch('/:submissionId/miscue-review', requireRole('teacher'), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.submissionId)) return res.status(400).json({ error: 'Invalid submission id.' });
+    const submission = await Submission.findById(req.params.submissionId);
+    if (!submission) return res.status(404).json({ error: 'Submission not found.' });
+    const classroom = await Class.findById(submission.class);
+    if (!classroom || String(classroom.teacher) !== req.userId) return res.status(403).json({ error: "You don't have access to this submission." });
+    if (!submission.audio?.fileId) return res.status(400).json({ error: 'A saved recording is required.' });
+    const current = submission.miscueReview?.reviewedAt?.toISOString() ?? null;
+    if (req.body.previousReviewedAt !== current) return res.status(409).json({ error: 'This review changed. Reload before saving.' });
+    const review = require('../utils/miscueReview').validateMiscueReview(req.body, submission.readingPassage, submission.transcript);
+    review.reviewedBy = req.userId;
+    review.reviewedAt = new Date(Math.max(Date.now(), (submission.miscueReview?.reviewedAt?.getTime() ?? 0) + 1));
+    const filter = { _id: submission._id, 'miscueReview.reviewedAt': submission.miscueReview?.reviewedAt ?? { $exists: false } };
+    const updated = await Submission.findOneAndUpdate(filter, { $set: { miscueReview: review } }, { new: true, runValidators: true });
+    if (!updated) return res.status(409).json({ error: 'This review changed. Reload before saving.' });
+    return res.json({ submission: updated });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ error: 'Could not save miscue review.' });
+  }
+});
+
 module.exports = router;
