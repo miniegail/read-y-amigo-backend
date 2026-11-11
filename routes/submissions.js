@@ -7,10 +7,11 @@ const Class = require("../models/Class");
 const Classwork = require("../models/ClassWork");
 const Enrollment = require("../models/Enrollment");
 const Submission = require("../models/Submission");
+const TeacherInbox = require("../models/TeacherInbox");
 
 const uploadAudio = require("../middleware/uploadAudio");
 const { requireAuth, requireRole } = require("../middleware/auth");
-const { saveBuffer } = require("../utils/gridfs");
+const { getBucket, saveBuffer } = require("../utils/gridfs");
 
 const router = express.Router();
 
@@ -164,6 +165,70 @@ router.post(
     }
   }
 );
+
+// DELETE /api/submissions/classwork/:classworkId
+router.delete("/classwork/:classworkId", requireRole("learner"), async (req, res) => {
+  const { classworkId } = req.params;
+  const { submissionId } = req.body ?? {};
+  if (!mongoose.isValidObjectId(classworkId) ||
+      (submissionId !== undefined && (typeof submissionId !== "string" || !mongoose.isValidObjectId(submissionId)))) {
+    return res.status(400).json({ error: "Invalid classwork or submission id." });
+  }
+
+  try {
+    const classwork = await Classwork.findById(classworkId);
+    if (!classwork || classwork.type !== "reading") {
+      return res.status(404).json({ error: "Reading assignment not found." });
+    }
+
+    const classroom = await Class.findOne({ _id: classwork.class, status: "active" });
+    if (!classroom) {
+      return res.status(404).json({ error: "Classroom not found." });
+    }
+
+    const enrolled = await Enrollment.exists({ class: classroom._id, learner: req.userId });
+    const assigned = classwork.assignToAll || classwork.assignedTo?.some(id => String(id) === req.userId);
+    if (!enrolled || !assigned) {
+      return res.status(403).json({ error: "You don't have access to this assignment." });
+    }
+
+    if (classwork.dueDate && new Date(classwork.dueDate).getTime() <= Date.now()) {
+      return res.status(403).json({ error: "The deadline has passed. You can no longer unsubmit this reading." });
+    }
+
+    const owner = { class: classroom._id, classwork: classwork._id, learner: req.userId };
+    const submission = await Submission.findOneAndDelete({
+      ...owner,
+      ...(submissionId ? { _id: submissionId } : {}),
+    });
+
+    if (!submission && submissionId && await Submission.exists(owner)) {
+      return res.status(409).json({ error: "This submission has changed. Reopen the assignment before trying again." });
+    }
+
+    if (submission) {
+      // The withdrawal is already committed. A cleanup failure must not report
+      // that the learner's submission is still in place.
+      const cleanup = await Promise.allSettled([
+        Promise.resolve().then(() => TeacherInbox.updateOne(
+          { _id: classroom.teacher },
+          { $pull: { items: { kind: "reading", submissionId: submission._id } } }
+        )),
+        Promise.resolve().then(() => {
+          if (submission.audio?.fileId) return getBucket().delete(submission.audio.fileId);
+        }),
+      ]);
+      for (const result of cleanup) {
+        if (result.status === "rejected") console.error("Reading withdrawal cleanup failed:", result.reason);
+      }
+    }
+
+    return res.json({ message: "Reading submission withdrawn." });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: "Something went wrong while withdrawing your reading." });
+  }
+});
 
 // GET /api/submissions/mine?classId=...
 // The logged-in learner's own submissions (used to show "Submitted").
