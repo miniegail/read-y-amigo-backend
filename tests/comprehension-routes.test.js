@@ -1,3 +1,4 @@
+require('../utils/notifications').notifyTeacher = async () => {};
 const {test}=require('node:test'), assert=require('node:assert/strict'), express=require('express'), mongoose=require('mongoose');
 const newId=()=>String(new mongoose.Types.ObjectId());
 const teacher=newId(),learner=newId(),other=newId(),classId=newId(),workId=newId();

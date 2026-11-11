@@ -1,3 +1,4 @@
+const { notifyTeacher } = require('../utils/notifications');
 const { parseMeasurement, calculateRate, measureAudio, rejectAuthoredFields } = require("../utils/readingRate");
 const express = require("express");
 const mongoose = require("mongoose");
@@ -147,6 +148,7 @@ router.post(
         },
       });
 
+      await notifyTeacher(classDoc, req.userId, { kind: 'reading', eventKey: `reading:${submission._id}`, title: classwork.title, classworkId: classwork._id, submissionId: submission._id });
       res.status(201).json({ submission });
     } catch (err) {
       if (err.status === 400) return res.status(400).json({ error: err.message });
@@ -325,6 +327,23 @@ router.patch('/:submissionId/word-accuracy', requireRole('teacher'), async (req,
     console.error(error);
     res.status(500).json({ error: 'Could not save word accuracy.' });
   }
+});
+
+router.patch('/:submissionId/verify', requireRole('teacher'), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.submissionId)) return res.status(400).json({ error: 'Invalid submission id.' });
+    const submission = await Submission.findById(req.params.submissionId);
+    if (!submission) return res.status(404).json({ error: 'Submission not found.' });
+    const classroom = await Class.findById(submission.class);
+    if (!classroom || classroom.status !== 'active' || String(classroom.teacher) !== req.userId) return res.status(403).json({ error: 'You do not own this submission.' });
+    if (req.body.confirmed !== true) return res.status(400).json({ error: 'Confirm that you reviewed this submission.' });
+    if (req.body.previousVerifiedAt !== (submission.verification?.verifiedAt?.toISOString() || null)) return res.status(409).json({ error: 'Verification changed. Reload before saving.' });
+    const updated = await Submission.findOneAndUpdate({ _id: submission._id, 'verification.verifiedAt': submission.verification?.verifiedAt || { $exists: false } }, { $set: {
+      verification: { verifiedAt: new Date(Math.max(Date.now(), (submission.verification?.verifiedAt?.getTime() || 0) + 1)), verifiedBy: req.userId },
+    } }, { new: true, runValidators: true });
+    if (!updated) return res.status(409).json({ error: 'Verification changed. Reload before saving.' });
+    res.json({ submission: updated });
+  } catch (error) { console.error(error); res.status(500).json({ error: 'Could not verify the submission.' }); }
 });
 
 module.exports = router;

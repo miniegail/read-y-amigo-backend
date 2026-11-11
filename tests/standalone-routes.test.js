@@ -1,3 +1,4 @@
+require('../utils/notifications').notifyTeacher = async () => {};
 const {test}=require('node:test'),assert=require('node:assert/strict'),express=require('express'),mongoose=require('mongoose');
 const id=()=>String(new mongoose.Types.ObjectId());const teacher=id(),learner=id(),other=id(),classId=id(),workId=id();
 const auth=require.resolve('../middleware/auth');require.cache[auth]={id:auth,filename:auth,loaded:true,exports:{requireAuth(req,res,next){req.userId=req.headers['x-user'];req.role=req.headers['x-role'];if(!req.userId)return res.status(401).json({error:'Login required'});next();},requireRole:role=>(req,res,next)=>req.role===role?next():res.status(403).json({error:'Role denied'})}};

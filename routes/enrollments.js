@@ -1,3 +1,4 @@
+const { notifyTeacher } = require('../utils/notifications');
 const express = require("express");
 const Class = require("../models/Class");
 const Enrollment = require("../models/Enrollment");
@@ -35,6 +36,7 @@ router.post("/join", async (req, res) => {
       comprehensionAvg: 0,
     });
 
+    await notifyTeacher(cls, req.userId, { kind: 'joined', eventKey: `joined:${enrollment._id}`, title: cls.title });
     res.status(201).json({ enrollment, class: cls });
   } catch (err) {
     console.error(err);

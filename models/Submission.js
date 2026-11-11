@@ -58,6 +58,7 @@ const submissionSchema = new mongoose.Schema(
       reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     }, { _id: false }), default: undefined },
 
+    verification: { type: new mongoose.Schema({ verifiedAt: Date, verifiedBy: mongoose.Schema.Types.ObjectId }, { _id: false }), default: undefined },
     transcript: { type: String, default: "", maxlength: 100000 },
     transcriptLocale: { type: String, enum: ["en-US", "fil-PH"] },
 

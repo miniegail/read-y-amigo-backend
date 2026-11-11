@@ -20,7 +20,7 @@ async function loadFile(req, res, next) {
 // 2) Class attachments are open by link (same as the old /uploads folder).
 //    Submission audio requires a logged-in user.
 function authIfPrivate(req, res, next) {
-  if (req.fileDoc.metadata?.kind === "submission-audio") {
+  if (["submission-audio", "activity-submission"].includes(req.fileDoc.metadata?.kind)) {
     return requireAuth(req, res, next);
   }
   next();
@@ -30,7 +30,7 @@ function authIfPrivate(req, res, next) {
 async function authorizePrivate(req, res, next) {
   try {
     const meta = req.fileDoc.metadata || {};
-    if (meta.kind !== "submission-audio") return next();
+    if (!["submission-audio", "activity-submission"].includes(meta.kind)) return next();
 
     if (String(meta.uploadedBy) === req.userId) return next();
 

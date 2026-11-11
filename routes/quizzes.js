@@ -1,3 +1,4 @@
+const { notifyTeacher } = require('../utils/notifications');
 const express = require('express');
 const mongoose = require('mongoose');
 const { requireAuth, requireRole } = require('../middleware/auth');
@@ -70,7 +71,10 @@ router.post('/attempts/:id/submit', requireRole('learner'), wrap(async (req, res
   const attempt = await attemptAccess(req, req.params.id, false, true);
   if (attempt.status !== 'draft') fail('This quiz has already been submitted.', 409);
   const answers = answersFor(attempt.quiz, req.body.answers, true), scored = grade(attempt.quiz, answers);
-  res.json({ attempt: publicAttempt(await update(req, attempt, { answers, ...scored, status: scored.result.status, submittedAt: new Date() })) });
+  const updated = await update(req, attempt, { answers, ...scored, status: scored.result.status, submittedAt: new Date() });
+  const classroom = await Class.findById(attempt.class);
+  await notifyTeacher(classroom, req.userId, { kind: 'quiz', eventKey: `quiz:${attempt._id}`, title: attempt.title, classworkId: attempt.classwork, attemptId: attempt._id });
+  res.json({ attempt: publicAttempt(updated) });
 }));
 router.get('/classwork/:id/attempts', requireRole('teacher'), wrap(async (req, res) => {
   const work = await access(req, req.params.id, true);

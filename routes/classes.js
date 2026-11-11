@@ -1,3 +1,5 @@
+const User = require('../models/User');
+const { classroomPerson, peopleEnrollments } = require('../utils/classroomPeople');
 const Submission = require('../models/Submission');
 const { Attempt } = require('../models/Comprehension');
 const { identity, buildHistory, summarizeHistory } = require('../utils/readingProgress');
@@ -1109,14 +1111,14 @@ router.get("/:classId/learners", async (req, res) => {
     })
       .populate(
         "learner",
-        "displayName firstName secondName"
+        "displayName firstName middleInitial secondName age profilePhoto role"
       )
       .sort({
         createdAt: 1,
       });
 
     res.json({
-      learners: enrollments,
+      learners: peopleEnrollments(enrollments),
     });
   } catch (err) {
     console.error(err);
@@ -1301,10 +1303,11 @@ learnerRouter.get("/:classId/materials", async (req, res) => {
 learnerRouter.get("/:classId/learners", async (req, res) => {
   try {
     const enrollments = await Enrollment.find({ class: req.classDoc._id })
-      .populate("learner", "displayName firstName secondName")
+      .populate("learner", "displayName firstName middleInitial secondName age profilePhoto role")
       .sort({ createdAt: 1 });
 
-    res.json({ learners: enrollments });
+    const teacher = await User.findById(req.classDoc.teacher).select('displayName firstName middleInitial secondName profilePhoto role');
+    res.json({ learners: peopleEnrollments(enrollments), teacher: classroomPerson(teacher, false) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
