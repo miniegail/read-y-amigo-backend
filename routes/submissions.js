@@ -302,4 +302,29 @@ router.patch('/:submissionId/miscue-review', requireRole('teacher'), async (req,
   }
 });
 
+// A teacher explicitly confirms assessed words and scored errors after listening.
+router.patch('/:submissionId/word-accuracy', requireRole('teacher'), async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.submissionId)) return res.status(400).json({ error: 'Invalid submission id.' });
+    const submission = await Submission.findById(req.params.submissionId);
+    if (!submission) return res.status(404).json({ error: 'Submission not found.' });
+    const classroom = await Class.findById(submission.class);
+    if (!classroom || classroom.status !== 'active' || String(classroom.teacher) !== req.userId) return res.status(403).json({ error: "You don't have access to this submission." });
+    if (!submission.audio?.fileId) return res.status(400).json({ error: 'A saved recording is required.' });
+    const current = submission.wordAccuracy?.reviewedAt?.toISOString() ?? null;
+    if (req.body.previousReviewedAt !== current) return res.status(409).json({ error: 'This accuracy review changed. Reload before saving.' });
+    const review = require('../utils/readingProgress').validateWordAccuracy(req.body, submission.readingPassage);
+    review.reviewedBy = req.userId;
+    review.reviewedAt = new Date(Math.max(Date.now(), (submission.wordAccuracy?.reviewedAt?.getTime() ?? 0) + 1));
+    const filter = { _id: submission._id, 'wordAccuracy.reviewedAt': submission.wordAccuracy?.reviewedAt ?? { $exists: false } };
+    const updated = await Submission.findOneAndUpdate(filter, { $set: { wordAccuracy: review } }, { new: true, runValidators: true });
+    if (!updated) return res.status(409).json({ error: 'This accuracy review changed. Reload before saving.' });
+    return res.json({ submission: updated });
+  } catch (error) {
+    if (error.status === 400) return res.status(400).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ error: 'Could not save word accuracy.' });
+  }
+});
+
 module.exports = router;

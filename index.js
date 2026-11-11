@@ -30,6 +30,7 @@ app.use("/api/comments", commentsRoutes);
 app.use("/api/submissions", submissionsRoutes);
 app.use("/api/files", filesRoutes);
 app.use("/api/comprehension", require("./routes/comprehension"));
+app.use("/api/quizzes", require("./routes/quizzes"));
 
 app.get("/", (req, res) => {
   res.json({ status: "READ-Y AMIGO server is running" });

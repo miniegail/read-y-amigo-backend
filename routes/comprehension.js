@@ -1,3 +1,4 @@
+const { resultSummary } = require('../utils/readingProgress');
 const express = require('express');
 const mongoose = require('mongoose');
 const { requireAuth, requireRole } = require('../middleware/auth');
@@ -58,6 +59,26 @@ router.get('/mine', requireRole('learner'), wrap(async (req, res) => {
   const classId = id(req.query.classId);
   const classroom = await Class.findById(classId);
   if (!classroom || classroom.status !== 'active' || !await Enrollment.findOne({ class: classId, learner: req.userId })) fail('You do not have access to this classroom.', 403);
+  if (req.query.include === 'results') {
+    const [all, readings, works] = await Promise.all([
+      Attempt.find({ class: classId, learner: req.userId }).select('classwork readingSubmission title status result submittedAt reviewedAt createdAt'),
+      Submission.find({ class: classId, learner: req.userId }).select('_id classwork'),
+      Classwork.find({ class: classId, type: 'reading', readingActivities: 'comprehension',
+        $or: [{ assignToAll: true }, { assignedTo: req.userId }] }).select('_id readingActivities'),
+    ]);
+    const assigned = new Map(works.map(work => [String(work._id), work]));
+    const current = new Map(readings.map(reading => [String(reading.classwork), String(reading._id)]));
+    const latest = new Map();
+    for (const attempt of all.slice().sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))) {
+      const work = assigned.get(String(attempt.classwork));
+      if (!work) continue;
+      const readingId = current.get(String(attempt.classwork));
+      if (work.readingActivities?.includes('read-aloud') ? !readingId || String(attempt.readingSubmission) !== readingId : !!attempt.readingSubmission) continue;
+      latest.set(String(attempt.classwork), attempt);
+    }
+    const visible = [...latest.values()];
+    return res.json({ classworkIds: visible.filter(attempt => attempt.status !== 'draft').map(attempt => String(attempt.classwork)), attempts: visible.map(resultSummary) });
+  }
   const attempts = await Attempt.find({ class: classId, learner: req.userId, status: { $in: ['pending-review', 'graded'] } }).select('classwork readingSubmission status');
   const readings = await Submission.find({ class: classId, learner: req.userId }).select('_id classwork');
   const current = new Set(readings.map(reading => String(reading._id)));

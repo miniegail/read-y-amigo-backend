@@ -52,6 +52,12 @@ const submissionSchema = new mongoose.Schema(
       reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     }, { _id: false }), default: undefined },
 
+    wordAccuracy: { type: new mongoose.Schema({
+      wordsAssessed: { type: Number, required: true }, errorCount: { type: Number, required: true },
+      percentage: { type: Number, required: true }, listened: Boolean, reviewedAt: Date,
+      reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    }, { _id: false }), default: undefined },
+
     transcript: { type: String, default: "", maxlength: 100000 },
     transcriptLocale: { type: String, enum: ["en-US", "fil-PH"] },
 

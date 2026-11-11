@@ -1,3 +1,6 @@
+const Submission = require('../models/Submission');
+const { Attempt } = require('../models/Comprehension');
+const { identity, buildHistory, summarizeHistory } = require('../utils/readingProgress');
 const { parsePassage, rejectAuthoredFields } = require("../utils/readingRate");
 const { parseReadingSource } = require("../utils/readingSource");
 const express = require("express");
@@ -718,6 +721,11 @@ router.post(
         }
       }
 
+      if (type === 'quiz') {
+        try { require('../utils/standaloneQuiz').standaloneConfig({ questions: parsedQuestions }); }
+        catch (error) { return res.status(400).json({ error: error.message }); }
+      }
+
       // -------------------------
       // Validate due date
       // -------------------------
@@ -895,6 +903,11 @@ router.post(
 );
 
 // ---------- Materials Library ----------
+
+router.get('/:classId/library', async (req, res) => {
+  try { res.json({ files: await require('../utils/classroomLibrary').classroomLibrary(req.classDoc._id) }); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'Could not load classroom library.' }); }
+});
 
 // GET /api/classes/:classId/materials
 router.get("/:classId/materials", async (req, res) => {
@@ -1129,9 +1142,20 @@ router.get("/:classId/progress", async (req, res) => {
         comprehensionAvg: -1,
       });
 
-    res.json({
-      progress: enrollments,
-    });
+    const [submissions, attempts, works] = await Promise.all([
+      Submission.find({ class: req.classDoc._id }).select('classwork learner submittedAt readingRate wordAccuracy'),
+      Attempt.find({ class: req.classDoc._id, status: { $in: ['pending-review', 'graded'] } }).select('classwork learner readingSubmission title status result submittedAt'),
+      Classwork.find({ class: req.classDoc._id }).select('title readingActivities'),
+    ]);
+    const readingsByLearner = new Map(), attemptsByLearner = new Map();
+    for (const row of submissions) { const key = identity(row.learner); if (!readingsByLearner.has(key)) readingsByLearner.set(key, []); readingsByLearner.get(key).push(row); }
+    for (const row of attempts) { const key = identity(row.learner); if (!attemptsByLearner.has(key)) attemptsByLearner.set(key, []); attemptsByLearner.get(key).push(row); }
+    res.json({ progress: enrollments.filter(enrollment => enrollment.learner).map(enrollment => {
+      const raw = enrollment.toObject ? enrollment.toObject() : enrollment;
+      const key = identity(enrollment.learner);
+      const history = buildHistory(readingsByLearner.get(key) || [], attemptsByLearner.get(key) || [], works);
+      return { ...raw, readingSummary: summarizeHistory(history), latestReadingAt: history[0]?.submittedAt };
+    }) });
   } catch (err) {
     console.error(err);
 
@@ -1139,6 +1163,25 @@ router.get("/:classId/progress", async (req, res) => {
       error:
         "Something went wrong while loading progress.",
     });
+  }
+});
+
+// The classId param middleware verifies the teacher and active classroom first.
+router.get('/:classId/progress/:learnerId', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.learnerId)) return res.status(400).json({ error: 'Invalid learner id.' });
+    const enrollment = await Enrollment.findOne({ class: req.classDoc._id, learner: req.params.learnerId }).populate('learner', 'displayName');
+    if (!enrollment?.learner) return res.status(404).json({ error: 'Learner is not enrolled in this classroom.' });
+    const filter = { class: req.classDoc._id, learner: req.params.learnerId };
+    const [submissions, attempts, works] = await Promise.all([
+      Submission.find(filter).select('classwork learner submittedAt readingRate wordAccuracy'),
+      Attempt.find({ ...filter, status: { $in: ['pending-review', 'graded'] } }).select('classwork learner readingSubmission title status result submittedAt'),
+      Classwork.find({ class: req.classDoc._id }).select('title readingActivities'),
+    ]);
+    res.json({ learner: { _id: identity(enrollment.learner), displayName: enrollment.learner.displayName }, history: buildHistory(submissions, attempts, works) });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load learner reading history.' });
   }
 });
 
@@ -1233,6 +1276,11 @@ learnerRouter.get("/:classId/classwork", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
   }
+});
+
+learnerRouter.get('/:classId/library', async (req, res) => {
+  try { res.json({ files: await require('../utils/classroomLibrary').classroomLibrary(req.classDoc._id, req.userId) }); }
+  catch (error) { console.error(error); res.status(500).json({ error: 'Could not load classroom library.' }); }
 });
 
 // GET /api/learner/classes/:classId/materials

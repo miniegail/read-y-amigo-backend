@@ -75,7 +75,7 @@ function publicAttempt(attempt, teacher = false) {
   const quiz = teacher ? raw.quiz : publicQuiz(raw.quiz);
   const passageAllowed = teacher || raw.quiz.passageAccess === 'during-quiz' || raw.status !== 'draft';
   return { _id: raw._id, title: raw.title, classwork: raw.classwork, learner: raw.learner, readingSubmission: raw.readingSubmission,
-    attemptLabel: raw.readingSubmission ? 'Linked reading attempt' : 'Comprehension-only attempt', revision: raw.revision, status: raw.status,
+    assessmentType: raw.assessmentType || 'passage', attemptLabel: raw.assessmentType === 'standalone' ? 'Standalone classroom quiz' : raw.readingSubmission ? 'Linked reading attempt' : 'Comprehension-only attempt', revision: raw.revision, status: raw.status,
     quiz, passage: passageAllowed ? raw.passage : undefined, answers: raw.answers, grades: raw.grades,
     result: raw.result, submittedAt: raw.submittedAt, reviewedAt: raw.reviewedAt };
 }
