@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
 
+    termsAcceptance: { version: String, acceptedAt: Date },
+
     firstName: { type: String, required: true },
     secondName: { type: String, required: true },
     middleInitial: { type: String },

@@ -1,3 +1,4 @@
+const { notifyClass } = require('../utils/pushNotifications');
 const express = require("express");
 
 const Class = require("../models/Class");
@@ -165,6 +166,10 @@ router.post(
 
       res.status(201).json({
         comment,
+      });
+      void notifyClass(classDoc._id, "There is a new comment in your class stream.", {
+        teacher: classDoc.teacher,
+        exclude: req.userId,
       });
     } catch (err) {
       console.error(err);

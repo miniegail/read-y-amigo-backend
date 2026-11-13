@@ -34,6 +34,7 @@ app.use("/api/quizzes", require("./routes/quizzes"));
 app.use("/api/activities", require("./routes/activities"));
 app.use("/api/teacher-work", require("./routes/teacherWork"));
 app.use("/api/notifications", require("./routes/notifications"));
+app.use("/api/mobile-notifications", require("./routes/mobileNotifications"));
 
 app.get("/", (req, res) => {
   res.json({ status: "READ-Y AMIGO server is running" });

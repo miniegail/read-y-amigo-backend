@@ -4,6 +4,23 @@ const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
 const User = require("../models/User");
 const { requireAuth } = require("../middleware/auth");
+const { createDeviceSession, rotateDeviceSession, revokeDeviceSession } = require("../utils/deviceSessions");
+
+const TERMS_VERSION = "2026-11-13";
+function readTermsAcceptance(body) {
+  if (body.termsAccepted === true && body.termsVersion === TERMS_VERSION) {
+    return { version: TERMS_VERSION, acceptedAt: new Date() };
+  }
+  if (body.sessionVersion === 2 || process.env.REQUIRE_SIGNUP_TERMS === "true") {
+    return null;
+  }
+  return undefined;
+}
+
+async function authResponse(user, body) {
+  const credentials = body.sessionVersion === 2 ? await createDeviceSession(user) : { token: createToken(user) };
+  return { ...credentials, user: toPublicUser(user) };
+}
 
 const multer = require("multer");
 const { saveBuffer, getBucket } = require("../utils/gridfs");
@@ -63,7 +80,12 @@ router.post("/teacher-signup", async (req, res) => {
       password,
     } = req.body;
 
-    // Verify CAPTCHA before doing anything else.
+    const termsAcceptance = readTermsAcceptance(req.body);
+    if (termsAcceptance === null) {
+      return res.status(400).json({ error: "Read and accept the current Terms and Conditions to sign up." });
+    }
+
+    // Verify the existing CAPTCHA before creating the account.
     if (!verifyCaptchaToken(captchaToken)) {
       return res.status(400).json({ error: "Please complete the verification." });
     }
@@ -93,10 +115,10 @@ router.post("/teacher-signup", async (req, res) => {
       learnerLevel,
       email: email.toLowerCase(),
       passwordHash,
+      termsAcceptance,
     });
 
-    const token = createToken(user);
-    res.status(201).json({ token, user: toPublicUser(user) });
+    res.status(201).json(await authResponse(user, req.body));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
@@ -116,7 +138,12 @@ router.post("/learner-signup", async (req, res) => {
       password,
     } = req.body;
 
-    // Verify CAPTCHA before doing anything else.
+    const termsAcceptance = readTermsAcceptance(req.body);
+    if (termsAcceptance === null) {
+      return res.status(400).json({ error: "Read and accept the current Terms and Conditions to sign up." });
+    }
+
+    // Verify the existing CAPTCHA before creating the account.
     if (!verifyCaptchaToken(captchaToken)) {
       return res.status(400).json({ error: "Please complete the verification." });
     }
@@ -145,10 +172,10 @@ router.post("/learner-signup", async (req, res) => {
       age,
       username,
       passwordHash,
+      termsAcceptance,
     });
 
-    const token = createToken(user);
-    res.status(201).json({ token, user: toPublicUser(user) });
+    res.status(201).json(await authResponse(user, req.body));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
@@ -172,16 +199,45 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Couldn't log in. Check your details and try again." });
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.passwordHash);
+    const passwordMatches = user.passwordHash && await bcrypt.compare(password, user.passwordHash);
     if (!passwordMatches) {
       return res.status(401).json({ error: "Couldn't log in. Check your details and try again." });
     }
 
-    const token = createToken(user);
-    res.json({ token, user: toPublicUser(user) });
+    res.json(await authResponse(user, req.body));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong. Please try again." });
+  }
+});
+
+router.post("/upgrade-session", requireAuth, async (req, res, next) => {
+  try {
+    if (req.sessionId) return res.status(400).json({ error: "This device already uses persistent sessions." });
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: "Please log in again." });
+    res.json(await authResponse(user, { sessionVersion: 2 }));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/refresh", async (req, res, next) => {
+  try {
+    const session = await rotateDeviceSession(req.body.refreshToken);
+    if (!session) return res.status(401).json({ error: "Session expired. Please log in again." });
+    res.json({ ...session, user: toPublicUser(session.user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/logout", async (req, res, next) => {
+  try {
+    await revokeDeviceSession(req.body.refreshToken);
+    res.sendStatus(204);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -287,9 +343,15 @@ router.post("/google/complete-signup", async (req, res) => {
       return res.json({ token, user: toPublicUser(existing) });
     }
 
+    const termsAcceptance = readTermsAcceptance(req.body);
+    if (termsAcceptance === null) {
+      return res.status(400).json({ error: "Read and accept the current Terms and Conditions to sign up." });
+    }
+
     const user = await User.create({
       role,
       googleId,
+      termsAcceptance,
       email,
       firstName,
       secondName,

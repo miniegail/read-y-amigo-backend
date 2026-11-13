@@ -1,3 +1,4 @@
+const { notifyClass } = require('../utils/pushNotifications');
 const User = require('../models/User');
 const { classroomPerson, peopleEnrollments } = require('../utils/classroomPeople');
 const Submission = require('../models/Submission');
@@ -356,6 +357,7 @@ router.post("/:classId/stream", async (req, res) => {
     res.status(201).json({
       post,
     });
+    void notifyClass(req.classDoc._id, "Your teacher posted an announcement.");
   } catch (err) {
     console.error(err);
 
@@ -892,6 +894,9 @@ router.post(
       res.status(201).json({
         classwork: item,
         streamPost,
+      });
+      void notifyClass(req.classDoc._id, `New ${typeLabels[type].toLowerCase()} assigned.`, {
+        assignedTo: shouldAssignToAll ? undefined : selectedLearners,
       });
     } catch (err) {
       console.error(err);
