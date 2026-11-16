@@ -20,5 +20,6 @@ const schema = new Schema({
   revision: { type: Number, default: 0 }, submittedAt: Date, reviewedAt: Date, reviewedBy: Schema.Types.ObjectId,
 }, { timestamps: true });
 schema.index({ classwork: 1, learner: 1, attemptKey: 1 }, { unique: true });
+schema.index({ learner: 1, status: 1, submittedAt: -1, _id: -1 });
 const Attempt = mongoose.model('ComprehensionAttempt', schema);
 module.exports = { QuizSet, Quiz, Attempt };

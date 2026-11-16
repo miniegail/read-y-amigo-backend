@@ -9,7 +9,7 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 
 function credentials(user, id, refreshSecret) {
   return {
-    token: jwt.sign({ id: user._id, role: user.role, sid: String(id) }, process.env.JWT_SECRET, { expiresIn: '15m' }),
+    token: jwt.sign({ id: user._id, role: user.role, sid: String(id), pv: user.passwordRevision }, process.env.JWT_SECRET, { expiresIn: '15m' }),
     refreshToken: `${id}.${refreshSecret}`,
     accessExpiresAt: Date.now() + 15 * 60 * 1000,
   };
@@ -19,7 +19,7 @@ async function createDeviceSession(user) {
   const refreshSecret = secret();
   const id = new Types.ObjectId();
   const result = credentials(user, id, refreshSecret);
-  await DeviceSession.create({ _id: id, user: user._id, refreshHash: digest(refreshSecret), expiresAt: expiration() });
+  await DeviceSession.create({ _id: id, user: user._id, refreshHash: digest(refreshSecret), expiresAt: expiration(), passwordRevision: user.passwordRevision });
   return result;
 }
 
@@ -33,8 +33,8 @@ async function rotateDeviceSession(token) {
   const filter = refreshFilter(token);
   if (!filter) return null;
 
-  const session = await DeviceSession.findOne({ ...filter, expiresAt: { $gt: new Date() } }).populate('user');
-  if (!session?.user) return null;
+  const session = await DeviceSession.findOne({ ...filter, expiresAt: { $gt: new Date() } }).populate({ path: 'user', select: '+passwordRevision' });
+  if (!session?.user || session.passwordRevision !== session.user.passwordRevision) return null;
 
   const refreshSecret = secret();
   const result = credentials(session.user, session._id, refreshSecret);

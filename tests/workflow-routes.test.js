@@ -7,7 +7,7 @@ Class.findById=async()=>({_id:classId,teacher,status:'active',title:'Filipino'})
 Activity.findOne=async()=>activity;Activity.create=async fields=>{activity={...fields,_id:id(),submittedAt:new Date()};return activity;};
 Activity.findById=()=>Object.assign(Promise.resolve(activity),{populate:async()=>activity});Activity.find=()=>({sort:async()=>activity?[activity]:[]});
 Activity.findOneAndUpdate=async(f,u)=>{Object.assign(activity,u.$set);return activity;};
-Submission.findById=async()=>reading;Submission.findOneAndUpdate=async(f,u)=>{Object.assign(reading,u.$set);return reading;};
+Submission.findById=async()=>reading;Submission.find=filter=>({sort:async()=>filter.learner===learner?[reading]:[]});Submission.findOneAndUpdate=async(f,u)=>{Object.assign(reading,u.$set);return reading;};
 require('../utils/notifications').notifyTeacher=async(...args)=>events.push(args);
 const grid=require('../utils/gridfs');grid.saveBuffer=async({metadata})=>{uploads++;fileMeta=metadata;return id();};grid.findFile=async()=>({_id:id(),length:3,filename:'answer.txt',contentType:'text/plain',metadata:{kind:'activity-submission',uploadedBy:learner,class:classId}});grid.getBucket=()=>({openDownloadStream:()=>Readable.from(Buffer.from('abc'))});
 let inboxOwner,readOwner;Inbox.findById=async owner=>{inboxOwner=owner;return{items:[]};};Inbox.updateOne=async filter=>{readOwner=filter._id;};
@@ -27,7 +27,14 @@ test('activity and verification HTTP routes enforce ownership, enrollment, assig
   assert.equal((await req('/activities/'+activity._id,other)).status,403);assert.equal((await req('/activities/'+activity._id,th)).status,200);
   const path='/activities/'+activity._id+'/review';assert.equal((await req(path,lh,'PATCH',{confirmed:true,previousCheckedAt:null})).status,403);assert.equal((await req(path,other,'PATCH',{confirmed:true,previousCheckedAt:null})).status,403);
   assert.equal((await req(path,th,'PATCH',{confirmed:false,previousCheckedAt:null})).status,400);assert.equal((await req(path,th,'PATCH',{confirmed:true,previousCheckedAt:null,feedback:'Well done'})).status,200);assert.equal(activity.checkedBy,teacher);assert.equal(activity.feedback,'Well done');assert.equal((await req(path,th,'PATCH',{confirmed:true,previousCheckedAt:null})).status,409);
-  const verify='/submissions/'+reading._id+'/verify';assert.equal((await req(verify,other,'PATCH',{confirmed:true,previousVerifiedAt:null})).status,403);assert.equal((await req(verify,th,'PATCH',{confirmed:false,previousVerifiedAt:null})).status,400);assert.equal((await req(verify,th,'PATCH',{confirmed:true,previousVerifiedAt:null})).status,200);assert.equal(reading.verification.verifiedBy,teacher);assert.equal((await req(verify,th,'PATCH',{confirmed:true,previousVerifiedAt:null})).status,409);
+  const verify='/submissions/'+reading._id+'/verify';assert.equal((await req(verify,other,'PATCH',{confirmed:true,previousVerifiedAt:null})).status,403);assert.equal((await req(verify,th,'PATCH',{confirmed:false,previousVerifiedAt:null})).status,400);assert.equal((await req(verify,th,'PATCH',{confirmed:true,previousVerifiedAt:null,feedback:{bad:true}})).status,400);
+  assert.equal((await req(verify+'-with-feedback',th,'PATCH',{confirmed:true,previousVerifiedAt:null,feedback:' Pause after each period. '})).status,200);
+  assert.equal(reading.verification.verifiedBy,teacher);
+  const mine=await req('/submissions/mine',lh);
+  assert.equal((await mine.json()).submissions[0].verification.feedback,'Pause after each period.');
+  const unrelated=await req('/submissions/mine',{'x-user':id(),'x-role':'learner'});
+  assert.deepEqual((await unrelated.json()).submissions,[]);
+  assert.equal((await req(verify,th,'PATCH',{confirmed:true,previousVerifiedAt:null})).status,409);
   assert.equal((await req('/files/'+id(),{})).status,401);assert.equal((await req('/files/'+id(),other)).status,403);assert.equal((await req('/files/'+id(),lh)).status,200);assert.equal((await req('/files/'+id(),th)).status,200);
   assert.equal((await req('/notifications',lh)).status,403);assert.equal((await req('/notifications',th)).status,200);assert.equal(inboxOwner,teacher);assert.equal((await req('/notifications/'+id()+'/read',other,'PATCH',{})).status,200);assert.equal(readOwner,other['x-user']);
  }finally{server.closeAllConnections();await new Promise(r=>server.close(r));}

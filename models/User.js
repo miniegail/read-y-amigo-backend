@@ -37,8 +37,22 @@ const userSchema = new mongoose.Schema(
     // Never store plain-text passwords - this stores the bcrypt hash.
     // Not required for Google accounts, which have no password.
     passwordHash: { type: String, required: false },
+    passwordRevision: { type: String, select: false },
+    backupRecoveryHash: { type: String, select: false },
+    passwordChallenge: {
+      type: new mongoose.Schema({
+        nonce: String, expiresAt: Date, attempts: Number, used: Boolean,
+      }, { _id: false }),
+      select: false,
+    },
+    passwordResetGrant: {
+      type: new mongoose.Schema({ hash: String, expiresAt: Date }, { _id: false }),
+      select: false,
+    },
   },
   { timestamps: true }
 );
+
+userSchema.index({ "passwordResetGrant.hash": 1 }, { sparse: true });
 
 module.exports = mongoose.model("User", userSchema);

@@ -5,17 +5,30 @@ const Class=require('../models/Class'),Work=require('../models/ClassWork'),Enrol
 const classroom={_id:classId,teacher,title:'Filipino',status:'active'};
 const works=[{_id:workId,class:classId,title:'Hiyas',type:'reading',readingActivities:['read-aloud'],assignToAll:true,createdAt:'2026-11-10',attachment:{name:'Hiyas.pdf',url:'/uploads/hiyas.pdf'}},
  {_id:id(),class:classId,title:'Private',type:'reading',assignToAll:false,assignedTo:[other],attachment:{name:'Private.pdf',url:'/uploads/private.pdf'},createdAt:'2026-11-09'}];
-const query=value=>({select(){return this},populate(){return this},sort(){return this},then(resolve,reject){return Promise.resolve(value).then(resolve,reject)}});
+const query=value=>({select(){return this},populate(){return this},sort(){return this},limit(){return this},lean(){return Promise.resolve(value)},then(resolve,reject){return Promise.resolve(value).then(resolve,reject)}});
 function match(row,filter){return Object.entries(filter).every(([key,value])=>key==='$or'?value.some(condition=>Object.entries(condition).every(([k,v])=>Array.isArray(row[k])?row[k].includes(v):row[k]===v)):value?.$in?value.$in.map(String).includes(String(row[key])):String(row[key])===String(value));}
 Class.find=filter=>query(match(classroom,filter)?[classroom]:[]);Class.findOne=async filter=>match(classroom,filter)?classroom:null;
 Enrollment.find=filter=>query([{class:classId,learner}].filter(row=>match(row,filter)));Enrollment.findOne=async filter=>filter.learner===learner?{class:classId,learner}:null;
 Work.find=filter=>query(works.filter(row=>match(row,filter)));
-Submission.find=filter=>query([{_id:id(),class:classId,learner,classwork:workId,submittedAt:'2026-11-10T01:00:00Z',readingRate:{wpm:92,status:'reviewed'}}].filter(row=>match(row,filter)));Attempt.find=()=>query([]);
+const submittedReading={_id:id(),class:classId,learner,classwork:workId,submittedAt:'2026-11-10T01:00:00Z',readingRate:{wpm:92,status:'reviewed'}};
+Submission.find=filter=>query(filter['readingRate.wpm'] ? (filter.learner===learner?[submittedReading]:[]) : [submittedReading].filter(row=>match(row,filter)));
+Submission.findOne=filter=>query(filter.learner===learner&&filter['wordAccuracy.reviewedAt']?{...submittedReading,wordAccuracy:{percentage:91,reviewedAt:'2026-11-11T01:00:00Z'}}:null);
+Attempt.find=filter=>query(filter.learner===learner&&filter.status==='graded'&&filter['result.pendingQuestions']===0?[{_id:id(),classwork:workId,readingSubmission:submittedReading._id,status:'graded',submittedAt:'2026-11-12T01:00:00Z',result:{percentage:80,pendingQuestions:0}}]:[]);
 test('reports and library enforce teacher ownership, learner enrollment, assignment and reporting filters',async()=>{
  const app=express();app.use(express.json());app.use('/reports',require('../routes/reports'));const routes=require('../routes/classes');app.use('/classes',routes.teacherRouter);app.use('/learner/classes',routes.learnerRouter);const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));const base=`http://127.0.0.1:${server.address().port}`;
  const call=async(path,role='teacher',user=teacher)=>{const res=await fetch(base+path,{headers:{'x-role':role,...(user?{'x-user':user}:{})}});return {status:res.status,data:await res.json()};};
  try{
   assert.equal((await call('/reports','teacher','')).status,401);assert.equal((await call('/reports','learner',learner)).status,403);
+  assert.equal((await call('/reports/learner')).status,403);
+  assert.equal((await call('/reports/learner','learner','')).status,401);
+  const own=await call('/reports/learner?learnerId='+other,'learner',learner);
+  assert.equal(own.status,200);
+  assert.equal(own.data.speed[0].speed.value,92);
+  assert.equal(own.data.accuracy.accuracy.value,91);
+  assert.equal(own.data.comprehension[0].comprehension.value,80);
+  assert.equal(own.data.comprehension[0].submittedAt,'2026-11-12T01:00:00Z');
+  const unrelated=await call('/reports/learner?learnerId='+learner,'learner',other);
+  assert.deepEqual(unrelated.data,{speed:[],accuracy:null,comprehension:[]});
   assert.equal((await call('/reports?classId='+foreignId)).status,403);assert.equal((await call('/reports?from=invalid')).status,400);assert.equal((await call('/reports?from=2026-11-10&to=2026-11-01')).status,400);
   let response=await call('/reports');assert.equal(response.status,200);assert.equal(response.data.totals.metrics.speed.value,92);assert.equal(response.data.totals.totalLearners,1);assert.equal(response.data.trend.length,1);
   response=await call('/reports?from=2026-12-01&to=2027-01-01');assert.equal(response.data.totals.metrics.speed.value,null);assert.equal(response.data.totals.totalLearners,1);

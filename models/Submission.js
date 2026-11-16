@@ -58,7 +58,7 @@ const submissionSchema = new mongoose.Schema(
       reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     }, { _id: false }), default: undefined },
 
-    verification: { type: new mongoose.Schema({ verifiedAt: Date, verifiedBy: mongoose.Schema.Types.ObjectId }, { _id: false }), default: undefined },
+    verification: { type: new mongoose.Schema({ verifiedAt: Date, verifiedBy: mongoose.Schema.Types.ObjectId, feedback: { type: String, maxlength: 6000 } }, { _id: false }), default: undefined },
     transcript: { type: String, default: "", maxlength: 100000 },
     transcriptLocale: { type: String, enum: ["en-US", "fil-PH"] },
 
@@ -78,5 +78,6 @@ const submissionSchema = new mongoose.Schema(
 
 // A learner can submit a given classwork only once.
 submissionSchema.index({ classwork: 1, learner: 1 }, { unique: true });
+submissionSchema.index({ learner: 1, submittedAt: -1, _id: -1 });
 
 module.exports = mongoose.model("Submission", submissionSchema);

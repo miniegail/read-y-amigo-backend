@@ -5,9 +5,34 @@ const Enrollment = require('../models/Enrollment');
 const Submission = require('../models/Submission');
 const Work = require('../models/ClassWork');
 const { Attempt } = require('../models/Comprehension');
+const { buildHistory } = require('../utils/readingProgress');
 const { reportProjection } = require('../utils/reports');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const router = express.Router();
+router.get('/learner', requireAuth, requireRole('learner'), async (req, res) => {
+  try {
+    const learner = req.userId;
+    const recent = { submittedAt: -1, _id: -1 };
+    const [readings, accuracy, attempts] = await Promise.all([
+      Submission.find({ learner, 'readingRate.wpm': { $gte: 0 } })
+        .select('classwork submittedAt readingRate').sort(recent).limit(10).lean(),
+      Submission.findOne({ learner, 'wordAccuracy.reviewedAt': { $type: 'date' }, 'wordAccuracy.percentage': { $gte: 0, $lte: 100 } })
+        .select('classwork submittedAt wordAccuracy').sort(recent).lean(),
+      Attempt.find({ learner, status: 'graded', 'result.pendingQuestions': 0, 'result.percentage': { $gte: 0, $lte: 100 }, submittedAt: { $type: 'date' } })
+        .select('classwork readingSubmission title status result submittedAt').sort(recent).limit(10).lean(),
+    ]);
+    const workIds = [...readings, ...attempts, ...(accuracy ? [accuracy] : [])].map(row => row.classwork);
+    const works = await Work.find({ _id: { $in: workIds } }).select('title').lean();
+    res.json({
+      speed: buildHistory(readings, [], works),
+      accuracy: accuracy ? buildHistory([accuracy], [], works)[0] ?? null : null,
+      comprehension: buildHistory([], attempts, works),
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Could not load your reading progress. Try again.' });
+  }
+});
 router.use(requireAuth, requireRole('teacher'));
 router.get('/', async (req, res) => {
   try {

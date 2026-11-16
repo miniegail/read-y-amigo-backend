@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 const { Types } = require('mongoose');
 const DeviceSession = require('../models/DeviceSession');
+const User = require('../models/User');
 const { createDeviceSession, rotateDeviceSession, revokeDeviceSession } = require('../utils/deviceSessions');
 const { requireAuth } = require('../middleware/auth');
 
@@ -10,6 +11,10 @@ test('device sessions rotate refresh secrets, revoke access on logout, and prese
   process.env.JWT_SECRET = 'device-session-test-secret';
   const user = { _id: new Types.ObjectId(), role: 'learner' };
   const sessions = new Map();
+  t.mock.method(User, 'exists', async filter => {
+    if (String(filter._id) !== String(user._id)) return null;
+    return (user.passwordRevision ? filter.passwordRevision === user.passwordRevision : filter.passwordRevision?.$exists === false) ? user : null;
+  });
 
   function match(filter) {
     const row = sessions.get(String(filter._id));
@@ -76,4 +81,12 @@ test('device sessions rotate refresh secrets, revoke access on logout, and prese
   const pending = jwt.sign({ role: 'learner', type: 'google-pending-signup' }, process.env.JWT_SECRET);
   assert.equal(await access(legacy), 200);
   assert.equal(await access(pending), 401);
+
+  user.passwordRevision = 'changed';
+  assert.equal(await access(legacy), 401);
+  assert.equal(await access(second.token), 401);
+  assert.equal(await rotateDeviceSession(second.refreshToken), null);
+  const fresh = await createDeviceSession(user);
+  assert.equal(await access(fresh.token), 200);
+  assert.ok(await rotateDeviceSession(fresh.refreshToken));
 });

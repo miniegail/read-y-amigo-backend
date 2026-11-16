@@ -26,6 +26,7 @@ const multer = require("multer");
 const { saveBuffer, getBucket } = require("../utils/gridfs");
 const { MAX_PHOTO_BYTES, photoMime, readingPreferences } = require("../utils/profileValidation");
 const router = express.Router();
+router.use("/recovery", require("./passwordRecovery"));
 const photoUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_PHOTO_BYTES, files: 1 } }).single("photo");
 async function discardPhoto(id) {
   if (id) { try { await getBucket().delete(new (require("mongoose").Types.ObjectId)(id)); } catch (error) { console.error("Photo cleanup:", error.message); } }
@@ -43,7 +44,7 @@ function verifyCaptchaToken(token) {
 
 function createToken(user) {
   return jwt.sign(
-    { id: user._id, role: user.role },
+    { id: user._id, role: user.role, pv: user.passwordRevision },
     process.env.JWT_SECRET,
     { expiresIn: "30d" }
   );
@@ -62,7 +63,7 @@ function createPendingSignupToken({ googleId, email, name, role }) {
 
 // Strips the password hash before sending a user object back to the app.
 function toPublicUser(user) {
-  const { passwordHash, ...publicUser } = user.toObject();
+  const { passwordHash, passwordRevision, backupRecoveryHash, passwordChallenge, passwordResetGrant, ...publicUser } = user.toObject();
   return publicUser;
 }
 
@@ -193,7 +194,7 @@ router.post("/login", async (req, res) => {
 
     const user = await User.findOne({
       $or: [{ email: identifier.toLowerCase() }, { username: identifier }],
-    });
+    }).select("+passwordRevision");
 
     if (!user) {
       return res.status(401).json({ error: "Couldn't log in. Check your details and try again." });
@@ -214,7 +215,7 @@ router.post("/login", async (req, res) => {
 router.post("/upgrade-session", requireAuth, async (req, res, next) => {
   try {
     if (req.sessionId) return res.status(400).json({ error: "This device already uses persistent sessions." });
-    const user = await User.findById(req.userId);
+    const user = await User.findOne({ _id: req.userId, passwordRevision: req.passwordRevision ?? { $exists: false } }).select("+passwordRevision");
     if (!user) return res.status(401).json({ error: "Please log in again." });
     res.json(await authResponse(user, { sessionVersion: 2 }));
   } catch (error) {
@@ -273,7 +274,7 @@ router.post("/google", async (req, res) => {
   }
 
   try {
-    let user = await User.findOne({ $or: [{ googleId }, { email: email.toLowerCase() }] });
+    let user = await User.findOne({ $or: [{ googleId }, { email: email.toLowerCase() }] }).select("+passwordRevision");
 
     if (user) {
       // Existing password-based account signing in with Google for the
